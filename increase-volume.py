@@ -87,8 +87,7 @@ def process_audio_file(file_path, backup_folder=None):
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Process WAV files to increase volume')
-    parser.add_argument('--folder', default='/Users/brian/Documents/VSTLive/projects/audio/Gig',
-                    help='Folder path containing WAV files')
+    parser.add_argument('--folder', help='Folder path containing WAV files')
     parser.add_argument('--backup-folder',
                     help='Folder path to store backup copies of original files before processing')
     parser.add_argument('--recent', action='store_true',
