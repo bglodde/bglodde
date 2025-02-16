@@ -67,7 +67,19 @@ class BackupError(AudioProcessingError):
 
 @dataclass
 class ProcessingConfig:
-    """Configuration for audio processing."""
+    """Audio processing configuration.
+
+    Attributes:
+        volume_factor: Factor to multiply audio volume by (must be > 0)
+        input_folder: Path to folder containing audio files
+        backup_folder: Optional path for backup copies
+        formats: Set of supported audio formats
+        recursive: Whether to process subdirectories
+        dry_run: Whether to perform dry run without changes
+        recent_only: Whether to only process recent files (<24h)
+        workers: Number of parallel workers
+        log_file: Optional path for log file
+    """
     volume_factor: float
     input_folder: Path
     backup_folder: Optional[Path]
@@ -121,6 +133,14 @@ class AudioProcessor:
         self.logger = logger
 
     def calculate_checksum(self, file_path: Path) -> str:
+        """Calculate SHA-256 checksum of a file.
+
+        Args:
+            file_path: Path to file to checksum
+        
+        Returns:
+            String containing hexadecimal SHA-256 checksum
+        """
         """Calculate SHA-256 checksum of a file."""
         sha256_hash = hashlib.sha256()
         with open(file_path, "rb") as f:
@@ -129,6 +149,14 @@ class AudioProcessor:
         return sha256_hash.hexdigest()
 
     def process_file(self, file_path: Path) -> bool:
+        """Process a single audio file with volume adjustment.
+
+        Args:
+            file_path: Path to audio file to process
+        
+        Returns:
+            True if processing succeeded, False otherwise
+        """
         """Process a single audio file."""
         try:
             if self.config.dry_run:
@@ -170,6 +198,11 @@ class FileHandler:
         self.logger = logger
 
     def get_files_to_process(self) -> List[Path]:
+        """Get list of audio files to process based on configuration.
+
+        Returns:
+            List of Path objects for files to be processed
+        """
         """Get list of audio files to process based on configuration."""
         files = []
         
@@ -193,70 +226,75 @@ class FileHandler:
 
         return files
 
-def main():
+def main() -> None:
+    """Main entry point for the script.
+    
+    Handles argument parsing, configuration, and processing workflow.
+    
+    Raises:
+        ValidationError: If configuration validation fails
+        SystemExit: If processing fails or user interrupts execution
+    """
     """Main entry point for the script."""
-    parser = argparse.ArgumentParser(
-        description='Process audio files to adjust volume with various options and safety features'
-    )
-    
-    parser.add_argument('--folder', type=Path,
-                    default=Path('/Users/brian/Documents/VSTLive/projects/audio/Gig'),
-                    help='Folder path containing audio files')
-    parser.add_argument('--backup-folder', type=Path,
-                    help='Folder path to store backup copies')
-    parser.add_argument('--volume-factor', type=float, default=1.2,
-                    help='Volume increase factor (e.g., 1.2 for 20% increase)')
-    parser.add_argument('--formats', type=str, default='wav',
-                    help='Comma-separated list of audio formats to process')
-    parser.add_argument('--recursive', action='store_true',
-                    help='Process files in subdirectories')
-    parser.add_argument('--recent', action='store_true',
-                    help='Only process files from last 24 hours')
-    parser.add_argument('--workers', type=int, default=1,
-                    help='Number of worker processes for parallel processing')
-    parser.add_argument('--dry-run', action='store_true',
-                    help='Show what would be done without making changes')
-    parser.add_argument('--log-file', type=str,
-                    help='Path to log file for detailed logging')
-    
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(
+            description='Process audio files to adjust volume with various options and safety features'
+        )
+        parser.add_argument('--folder', type=Path, required=True,
+                        help='Folder path containing audio files')
+        parser.add_argument('--backup-folder', type=Path,
+                        help='Folder path to store backup copies')
+        parser.add_argument('--volume-factor', type=float, default=1.2,
+                        help='Volume increase factor (e.g., 1.2 for 20% increase)')
+        parser.add_argument('--formats', type=str, default='wav',
+                        help='Comma-separated list of audio formats to process')
+        parser.add_argument('--recursive', action='store_true',
+                        help='Process files in subdirectories')
+        parser.add_argument('--recent', action='store_true',
+                        help='Only process files from last 24 hours')
+        parser.add_argument('--workers', type=int, default=1,
+                        help='Number of worker processes for parallel processing')
+        parser.add_argument('--dry-run', action='store_true',
+                        help='Show what would be done without making changes')
+        parser.add_argument('--log-file', type=str,
+                        help='Path to log file for detailed logging')
+        
+        args = parser.parse_args()
 
+        # Initialize configuration
+        config = ProcessingConfig(
+            volume_factor=args.volume_factor,
+            input_folder=args.folder,
+            backup_folder=args.backup_folder,
+            formats=set(args.formats.split(',')),
+            recursive=args.recursive,
+            dry_run=args.dry_run,
+            recent_only=args.recent,
+            workers=args.workers,
+            log_file=args.log_file
+        )
 
-try:
-    # Initialize configuration
-    config = ProcessingConfig(
-        volume_factor=args.volume_factor,
-        input_folder=args.folder,
-        backup_folder=args.backup_folder,
-        formats=set(args.formats.split(',')),
-        recursive=args.recursive,
-        dry_run=args.dry_run,
-        recent_only=args.recent,
-        workers=args.workers,
-        log_file=args.log_file
-    )
-except ValidationError as e:
-    print(f"Error: {str(e)}")
-    sys.exit(1)
+        # Initialize logger
+        logger = Logger(log_file=config.log_file)
 
-# Initialize logger
-logger = Logger(log_file=config.log_file)
+        # Initialize file handler
+        file_handler = FileHandler(config, logger)
 
-# Initialize file handler
-file_handler = FileHandler(config, logger)
+        # Initialize audio processor
+        audio_processor = AudioProcessor(config, logger)
 
-# Initialize audio processor
-audio_processor = AudioProcessor(config, logger)
+        # Get list of files to process
+        files_to_process = file_handler.get_files_to_process()
 
-# Get list of files to process
-files_to_process = file_handler.get_files_to_process()
+        # Process files in parallel
+        with ProcessPoolExecutor(max_workers=config.workers) as executor:
+            futures = []
+            for file_path in files_to_process:
+                futures.append(executor.submit(audio_processor.process_file, file_path))
 
-# Process files in parallel
-with ProcessPoolExecutor(max_workers=config.workers) as executor:
-    futures = []
-    for file_path in files_to_process:
-        futures.append(executor.submit(audio_processor.process_file, file_path))
-
-    for future in tqdm(as_completed(futures), total=len(files_to_process)):
-        if future.result() is False:
-            sys.exit(1)
+            for future in tqdm(as_completed(futures), total=len(files_to_process)):
+                if future.result() is False:
+                    sys.exit(1)
+    except ValidationError as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
