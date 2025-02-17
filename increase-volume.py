@@ -99,40 +99,48 @@ class ProcessingConfig:
             os.makedirs(self.backup_folder)
 
 class Logger:
-    """Handles all logging operations."""
+    """Handles all logging operations with support for multiple logging levels."""
     def __init__(self, log_file: Optional[str] = None):
         self.logger = logging.getLogger('AudioProcessor')
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG to allow all levels
         
         # Remove any existing handlers to avoid duplicates
         self.logger.handlers = []
         
         # Create formatter for consistent output
-        formatter = logging.Formatter('%(message)s')  # Simplified format for clearer output
+        formatter = logging.Formatter('%(levelname)s: %(message)s')
 
         # Always add console handler for immediate feedback
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.INFO)  # Console shows INFO and above
         self.logger.addHandler(console_handler)
         
         # Add file handler if specified
         if log_file:
             file_handler = logging.FileHandler(log_file)
             file_handler.setFormatter(formatter)
+            file_handler.setLevel(logging.DEBUG)  # File logs everything
             self.logger.addHandler(file_handler)
         
         # Initial session message
         self.logger.info("=== Audio Processing Session Started ===")
 
+    def debug(self, msg: str) -> None:
+        """Log debug level message."""
+        self.logger.debug(msg)
+
     def info(self, msg: str) -> None:
+        """Log info level message."""
         self.logger.info(msg)
 
-    def error(self, msg: str) -> None:
-        self.logger.error(msg)
-
     def warning(self, msg: str) -> None:
+        """Log warning level message."""
         self.logger.warning(msg)
+
+    def error(self, msg: str) -> None:
+        """Log error level message."""
+        self.logger.error(msg)
 
 class AudioProcessor:
     """Handles audio file processing operations."""
@@ -210,8 +218,8 @@ class FileHandler:
 
     def get_files_to_process(self) -> List[Path]:
         """Get list of audio files to process."""
-        self.logger.debug(f"Searching for audio files in: {self.config.input_folder}")
-        self.logger.debug(f"File formats to process: {self.config.formats}")
+        self.logger.info(f"Searching for audio files in: {self.config.input_folder}")
+        self.logger.info(f"File formats to process: {self.config.formats}")
         
         if not self.config.input_folder.exists():
             self.logger.error(f"Input folder does not exist: {self.config.input_folder}")
@@ -231,18 +239,18 @@ class FileHandler:
             else:
                 matches = list(self.config.input_folder.glob(pattern))
             
-            self.logger.debug(f"Found {len(matches)} files matching {pattern}")
+            self.logger.info(f"Found {len(matches)} files matching {pattern}")
             for match in matches:
                 self.logger.debug(f"Found file: {match}")
             files.extend(matches)
 
         if self.config.recent_only:
             cutoff_time = datetime.now() - timedelta(hours=24)
-            self.logger.debug(f"Filtering for files modified after: {cutoff_time}")
+            self.logger.info(f"Filtering for files modified after: {cutoff_time}")
             files = [f for f in files if f.stat().st_mtime > cutoff_time.timestamp()]
-            self.logger.debug(f"After time filter: {len(files)} files remaining")
+            self.logger.info(f"After time filter: {len(files)} files remaining")
 
-        self.logger.debug(f"Total files to process: {len(files)}")
+        self.logger.info(f"Total files to process: {len(files)}")
         return files
 
 def parse_arguments():
@@ -272,18 +280,32 @@ def parse_arguments():
 def main() -> None:
     print("Starting audio processing script...")
     try:
-        # Configure root logger first
-        logging.basicConfig(level=logging.DEBUG)
-        logger = logging.getLogger(__name__)
-        
-        # Parse arguments
+        # Parse arguments first
         args = parse_arguments()
-        logger.debug(f"Parsed arguments: {vars(args)}")
         
+        # Initialize logger with parsed arguments
+        logger = Logger(args.log_file)
+        
+        # Log startup information
+        logger.info("Audio Processing Script Started")
+        logger.info(f"Parsed arguments: {vars(args)}")
+        logger.info(f"Parsed arguments: {vars(args)}")
+
+        # Create backup directory if specified
+        backup_path = None
+        if args.backup_folder:
+            backup_path = Path(args.backup_folder)
+            try:
+                logger.info(f"Setting up backup directory: {backup_path}")
+                backup_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to create backup directory: {e}")
+                raise
+
         # Create configuration
         config = ProcessingConfig(
             input_folder=Path(args.folder),
-            backup_folder=args.backup_folder,
+            backup_folder=Path(args.backup_folder) if args.backup_folder else None,
             formats=set(args.formats.lower().split(',')) if args.formats else {'wav'},
             dry_run=args.dry_run,
             recursive=args.recursive,
@@ -292,19 +314,12 @@ def main() -> None:
             log_file=args.log_file,
             volume_factor=args.volume_factor
         )
-        
-        logger.debug("Configuration created successfully")
-        logger.debug(f"Input folder: {config.input_folder}")
-        logger.debug(f"Formats: {config.formats}")
-        
-        # Configure file handler if log file specified
-        if config.log_file:
-            file_handler = logging.FileHandler(config.log_file)
-            file_handler.setLevel(logging.DEBUG)
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-        
+
+        logger.info("Configuration created successfully")
+        logger.info(f"Input folder: {config.input_folder}")
+        logger.info(f"Backup folder: {config.backup_folder}")
+        logger.info(f"Formats: {config.formats}")
+
         # Initialize handlers
         file_handler = FileHandler(config, logger)
         files = file_handler.get_files_to_process()
@@ -312,19 +327,41 @@ def main() -> None:
         if not files:
             logger.info("No files found to process")
             return
-            
+
+        # Initialize audio processor
+        audio_processor = AudioProcessor(config, logger)
+        
         # Process files
-        for file in files:
+        with ProcessPoolExecutor(max_workers=config.workers) as executor:
             if config.dry_run:
-                logger.info(f"Would process: {file}")
-                logger.info(f"Would increase volume by factor: {config.volume_factor}")
+                for file in files:
+                    logger.info(f"Would process: {file}")
+                    if config.backup_folder:
+                        logger.info(f"Would backup to: {config.backup_folder / file.name}")
+                    logger.info(f"Would increase volume by factor: {config.volume_factor}")
             else:
-                logger.info(f"Processing: {file}")
-            
+                # Submit all file processing tasks
+                future_to_file = {executor.submit(audio_processor.process_file, file): file for file in files}
+                
+                # Process results as they complete
+                for future in tqdm(as_completed(future_to_file), total=len(files), desc="Processing files"):
+                    file = future_to_file[future]
+                    try:
+                        success = future.result()
+                        if success:
+                            logger.info(f"Successfully processed: {file}")
+                        else:
+                            logger.error(f"Failed to process: {file}")
+                    except Exception as e:
+                        logger.error(f"Error processing {file}: {str(e)}")
+
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+        sys.exit(1)
     except Exception as e:
         print(f"ERROR: {str(e)}")
         import traceback
         traceback.print_exc()
-
+        sys.exit(1)
 if __name__ == '__main__':
     main()
