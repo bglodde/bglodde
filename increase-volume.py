@@ -3,9 +3,12 @@
 Audio Volume Processor
 
 A comprehensive audio processing tool that can increase volume of audio files
-with various safety features and options.
+with advanced dynamic processing, safety features and options.
 
 Features:
+- Intelligent volume processing with compression and limiting
+- Dynamic range compression with configurable threshold and ratio
+- Soft-knee limiting for peak protection
 - Supports multiple audio formats (WAV, FLAC, OGG, etc.)
 - Configurable volume adjustment
 - Parallel processing for better performance
@@ -13,7 +16,6 @@ Features:
 - Backup and safety features
 - Detailed logging
 - Dry-run mode for testing
-
 Usage Examples:
 --------------
 1. Basic usage (default 20% volume increase):
@@ -68,17 +70,24 @@ class BackupError(AudioProcessingError):
 class ProcessingConfig:
     """Audio processing configuration.
 
-    Attributes:
-        volume_factor: Factor to multiply audio volume by (must be > 0)
-        input_folder: Path to folder containing audio files
-        backup_folder: Optional path for backup copies
-        formats: Set of supported audio formats
-        recursive: Whether to process subdirectories
-        dry_run: Whether to perform dry run without changes
-        recent_only: Whether to only process recent files (<24h)
-        workers: Number of parallel workers
-        log_file: Optional path for log file
-    """
+Attributes:
+    volume_factor: Factor to multiply audio volume by (must be > 0)
+    input_folder: Path to folder containing audio files
+    backup_folder: Optional path for backup copies
+    formats: Set of supported audio formats
+    recursive: Whether to process subdirectories
+    dry_run: Whether to perform dry run without changes
+    recent_only: Whether to only process recent files (<24h)
+    workers: Number of parallel workers
+    log_file: Optional path for log file
+    volume_increase: Optional float tracking the actual volume increase achieved
+                    after compression and limiting
+
+The configuration includes settings for both the basic volume adjustment
+and the advanced dynamic processing features (compression and limiting).
+The volume_factor setting works in conjunction with dynamic processing
+to achieve the desired volume increase while maintaining audio quality.
+"""
     volume_factor: float
     input_folder: Path
     backup_folder: Optional[Path]
@@ -209,8 +218,14 @@ class AudioProcessor:
             rms_amp = float(np.mean(original_rms))
             self.logger.info(f"Original max amplitude: {max_amp:.4f}, RMS: {rms_amp:.4f}")
 
-            # Compression stage
-            # Convert to dB (maintain dimensions)
+            # Dynamic Range Compression Stage
+            # Apply professional-grade dynamic range compression to control volume dynamics
+            # while preserving audio quality. This stage involves:
+            # 1. Converting to dB scale for proper compression processing
+            # 2. Applying threshold-based compression with ratio
+            # 3. Using attack/release envelope for smooth gain changes
+
+            # Convert to dB scale while maintaining array dimensions
             eps = 1e-10  # Prevent log of zero
             db = 20 * np.log10(np.abs(data) + eps)
 
@@ -249,9 +264,15 @@ class AudioProcessor:
             # Volume increase
             volume_increased = compressed * self.config.volume_factor
 
-            # Soft-knee limiter
-            limiter_threshold = 0.95
-            knee_width = 0.1
+            # Soft-knee Limiter Stage
+            # Implement transparent limiting to prevent digital clipping while
+            # maintaining natural sound. Features:
+            # 1. Gradual gain reduction using soft knee for transparency
+            # 2. Independent per-channel processing
+            # 3. Automated makeup gain and peak protection
+
+            limiter_threshold = 0.95  # Target maximum output level
+            knee_width = 0.1  # Width of soft knee transition region
             max_amplitude = np.max(np.abs(volume_increased), axis=0)
 
             # Only limit if needed
@@ -310,7 +331,18 @@ class AudioProcessor:
             return False
 
 class FileHandler:
-    """Handles file system operations."""
+    """Handles file system operations for audio processing.
+    
+    This class manages all file-related operations including:
+    - Recursive file discovery
+    - Format filtering
+    - Recent file filtering
+    - Path validation
+    - File enumeration
+    
+    It works closely with the ProcessingConfig to determine which files
+    should be processed based on format, recursion settings, and time
+    filters."""
     def __init__(self, config: ProcessingConfig, logger: logging.Logger):
         """
         Initialize the FileHandler with configuration and logger.
