@@ -289,7 +289,6 @@ def main() -> None:
         # Log startup information
         logger.info("Audio Processing Script Started")
         logger.info(f"Parsed arguments: {vars(args)}")
-        logger.info(f"Parsed arguments: {vars(args)}")
 
         # Create backup directory if specified
         backup_path = None
