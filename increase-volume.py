@@ -197,26 +197,76 @@ class AudioProcessor:
 
             # Calculate original stats
             original_max = np.abs(data).max()
-            self.logger.info(f"Original max amplitude: {original_max:.4f}")
+            original_rms = np.sqrt(np.mean(data**2))
+            self.logger.info(f"Original max amplitude: {original_max:.4f}, RMS: {original_rms:.4f}")
 
-            # Increase volume
-            volume_increased = data * self.config.volume_factor
-            new_max = np.abs(volume_increased).max()
-            self.logger.info(f"New max amplitude after increase: {new_max:.4f}")
+            # Compression stage
+            # Convert to dB
+            eps = 1e-10  # Prevent log of zero
+            db = 20 * np.log10(np.abs(data) + eps)
 
-            # Only normalize if absolutely necessary to prevent clipping
-            if new_max > 1.0:
-                self.logger.warning(f"Amplitude would clip at {new_max:.4f}, normalizing to prevent distortion")
-                scaling_factor = 0.99 / new_max  # Leave tiny headroom
-                volume_increased = volume_increased * scaling_factor
-                final_max = np.abs(volume_increased).max()
-                self.logger.info(f"After normalization max amplitude: {final_max:.4f}")
-            else:
-                self.logger.info(f"No normalization needed, final max amplitude: {new_max:.4f}")
+            # Compression parameters
+            threshold_db = -12  # Compression threshold in dB
+            ratio = 2.0  # Compression ratio (2:1)
+            attack_ms = 5  # Attack time in milliseconds
+            release_ms = 50  # Release time in milliseconds
 
-            # Calculate and log the effective volume change
-            effective_change = np.abs(volume_increased).max() / original_max
-            self.logger.info(f"Effective volume increase factor: {effective_change:.4f}x")
+            # Calculate gain reduction
+            gain_reduction_db = np.maximum(0, db - threshold_db) * (1 - 1/ratio)
+
+            # Apply attack/release envelope
+            attack_samples = int(samplerate * attack_ms / 1000)
+            release_samples = int(samplerate * release_ms / 1000)
+
+            # Smooth gain reduction
+            window = np.concatenate([
+                np.ones(attack_samples) / attack_samples,
+                np.exp(-np.arange(release_samples) / (release_samples/3))
+            ])
+            window = window / np.sum(window)
+            smoothed_reduction = np.convolve(gain_reduction_db, window, mode='same')
+
+            # Apply compression
+            compressed = data * np.power(10, -smoothed_reduction/20)
+
+            # Volume increase
+            volume_increased = compressed * self.config.volume_factor
+
+            # Soft-knee limiter
+            limiter_threshold = 0.95
+            knee_width = 0.1
+            max_amplitude = np.abs(volume_increased).max()
+
+            if max_amplitude > (limiter_threshold - knee_width):
+                self.logger.info(f"Applying soft-knee limiting above {limiter_threshold-knee_width:.2f}")
+                
+                # Calculate attenuation curve
+                gain_reduction = np.zeros_like(volume_increased)
+                amplitude = np.abs(volume_increased)
+                
+                # Soft knee region
+                knee_start = limiter_threshold - knee_width
+                knee_end = limiter_threshold
+                
+                knee_mask = (amplitude > knee_start) & (amplitude <= knee_end)
+                above_knee = amplitude > knee_end
+                
+                # Quadratic gain reduction in knee region
+                x = (amplitude[knee_mask] - knee_start) / knee_width
+                gain_reduction[knee_mask] = x * x * (knee_width / 2)
+                
+                # Hard limiting above knee
+                gain_reduction[above_knee] = amplitude[above_knee] - limiter_threshold
+                
+                # Apply gain reduction
+                volume_increased = volume_increased * np.power(10, -gain_reduction/20)
+
+            # Calculate final stats
+            final_max = np.abs(volume_increased).max()
+            final_rms = np.sqrt(np.mean(volume_increased**2))
+
+            self.logger.info(f"Final max amplitude: {final_max:.4f}, RMS: {final_rms:.4f}")
+            self.logger.info(f"Volume increase: {(final_rms/original_rms):.2f}x (RMS), Peak: {(final_max/original_max):.2f}x")
 
             # Write processed audio
             sf.write(file_path, volume_increased, samplerate)
