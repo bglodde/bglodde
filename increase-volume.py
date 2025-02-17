@@ -195,13 +195,22 @@ class AudioProcessor:
             # Process audio
             data, samplerate = sf.read(file_path)
 
-            # Calculate original stats
-            original_max = np.abs(data).max()
-            original_rms = np.sqrt(np.mean(data**2))
-            self.logger.info(f"Original max amplitude: {original_max:.4f}, RMS: {original_rms:.4f}")
+            # Ensure data is 2D array (samples, channels)
+            if len(data.shape) == 1:
+                data = data.reshape(-1, 1)
+
+            # Calculate original stats per channel
+            # Calculate per-channel statistics
+            original_max = np.max(np.abs(data), axis=0)
+            original_rms = np.sqrt(np.mean(data**2, axis=0))
+
+            # Convert to scalar values by taking mean across channels
+            max_amp = float(np.mean(original_max))
+            rms_amp = float(np.mean(original_rms))
+            self.logger.info(f"Original max amplitude: {max_amp:.4f}, RMS: {rms_amp:.4f}")
 
             # Compression stage
-            # Convert to dB
+            # Convert to dB (maintain dimensions)
             eps = 1e-10  # Prevent log of zero
             db = 20 * np.log10(np.abs(data) + eps)
 
@@ -211,22 +220,30 @@ class AudioProcessor:
             attack_ms = 5  # Attack time in milliseconds
             release_ms = 50  # Release time in milliseconds
 
-            # Calculate gain reduction
+            # Calculate gain reduction per channel
             gain_reduction_db = np.maximum(0, db - threshold_db) * (1 - 1/ratio)
 
             # Apply attack/release envelope
             attack_samples = int(samplerate * attack_ms / 1000)
             release_samples = int(samplerate * release_ms / 1000)
 
-            # Smooth gain reduction
+            # Create smoothing window
             window = np.concatenate([
                 np.ones(attack_samples) / attack_samples,
                 np.exp(-np.arange(release_samples) / (release_samples/3))
             ])
             window = window / np.sum(window)
-            smoothed_reduction = np.convolve(gain_reduction_db, window, mode='same')
 
-            # Apply compression
+            # Smooth gain reduction for each channel
+            smoothed_reduction = np.zeros_like(gain_reduction_db)
+            for channel in range(data.shape[1]):
+                smoothed_reduction[:, channel] = np.convolve(
+                    gain_reduction_db[:, channel], 
+                    window, 
+                    mode='same'
+                )
+
+            # Apply compression (maintains dimensions)
             compressed = data * np.power(10, -smoothed_reduction/20)
 
             # Volume increase
@@ -235,12 +252,13 @@ class AudioProcessor:
             # Soft-knee limiter
             limiter_threshold = 0.95
             knee_width = 0.1
-            max_amplitude = np.abs(volume_increased).max()
+            max_amplitude = np.max(np.abs(volume_increased), axis=0)
 
-            if max_amplitude > (limiter_threshold - knee_width):
+            # Only limit if needed
+            if np.any(max_amplitude > (limiter_threshold - knee_width)):
                 self.logger.info(f"Applying soft-knee limiting above {limiter_threshold-knee_width:.2f}")
                 
-                # Calculate attenuation curve
+                # Calculate attenuation curve per channel
                 gain_reduction = np.zeros_like(volume_increased)
                 amplitude = np.abs(volume_increased)
                 
@@ -248,25 +266,39 @@ class AudioProcessor:
                 knee_start = limiter_threshold - knee_width
                 knee_end = limiter_threshold
                 
-                knee_mask = (amplitude > knee_start) & (amplitude <= knee_end)
-                above_knee = amplitude > knee_end
+                for channel in range(data.shape[1]):
+                    knee_mask = (amplitude[:, channel] > knee_start) & (amplitude[:, channel] <= knee_end)
+                    above_knee = amplitude[:, channel] > knee_end
+                    
+                    # Quadratic gain reduction in knee region
+                    x = (amplitude[knee_mask, channel] - knee_start) / knee_width
+                    gain_reduction[knee_mask, channel] = x * x * (knee_width / 2)
+                    
+                    # Hard limiting above knee
+                    gain_reduction[above_knee, channel] = amplitude[above_knee, channel] - limiter_threshold
                 
-                # Quadratic gain reduction in knee region
-                x = (amplitude[knee_mask] - knee_start) / knee_width
-                gain_reduction[knee_mask] = x * x * (knee_width / 2)
-                
-                # Hard limiting above knee
-                gain_reduction[above_knee] = amplitude[above_knee] - limiter_threshold
-                
-                # Apply gain reduction
+                # Apply gain reduction (maintains dimensions)
                 volume_increased = volume_increased * np.power(10, -gain_reduction/20)
 
+            # Squeeze back to mono if input was mono
+            if data.shape[1] == 1:
+                volume_increased = volume_increased.squeeze()
+
             # Calculate final stats
-            final_max = np.abs(volume_increased).max()
-            final_rms = np.sqrt(np.mean(volume_increased**2))
+            # Calculate per-channel statistics for processed audio
+            final_max_per_channel = np.max(np.abs(volume_increased), axis=0)
+            final_rms_per_channel = np.sqrt(np.mean(volume_increased**2, axis=0))
+
+            # Convert to scalar values for logging
+            final_max = float(np.mean(final_max_per_channel))
+            final_rms = float(np.mean(final_rms_per_channel))
+
+            # Calculate ratios using mean values to avoid division issues
+            rms_ratio = float(np.mean(final_rms_per_channel / np.maximum(original_rms, 1e-10)))
+            peak_ratio = float(np.mean(final_max_per_channel / np.maximum(original_max, 1e-10)))
 
             self.logger.info(f"Final max amplitude: {final_max:.4f}, RMS: {final_rms:.4f}")
-            self.logger.info(f"Volume increase: {(final_rms/original_rms):.2f}x (RMS), Peak: {(final_max/original_max):.2f}x")
+            self.logger.info(f"Volume increase: {rms_ratio:.2f}x (RMS), Peak: {peak_ratio:.2f}x")
 
             # Write processed audio
             sf.write(file_path, volume_increased, samplerate)
@@ -280,6 +312,20 @@ class AudioProcessor:
 class FileHandler:
     """Handles file system operations."""
     def __init__(self, config: ProcessingConfig, logger: logging.Logger):
+        """
+        Initialize the FileHandler with configuration and logger.
+
+        This constructor sets up the FileHandler with the necessary configuration
+        and logging capabilities for file system operations.
+
+        Args:
+            config (ProcessingConfig): Configuration object containing processing parameters
+                                       and settings for file handling.
+            logger (logging.Logger): Logger object for recording file handling operations
+                                     and any relevant messages.
+
+        The method doesn't return any value but initializes the instance variables.
+        """
         self.config = config
         self.logger = logger
 
