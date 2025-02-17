@@ -194,12 +194,29 @@ class AudioProcessor:
 
             # Process audio
             data, samplerate = sf.read(file_path)
-            volume_increased = data * self.config.volume_factor
 
-            # Normalize if needed
-            max_amplitude = np.abs(volume_increased).max()
-            if max_amplitude > 1.0:
-                volume_increased = volume_increased / max_amplitude
+            # Calculate original stats
+            original_max = np.abs(data).max()
+            self.logger.info(f"Original max amplitude: {original_max:.4f}")
+
+            # Increase volume
+            volume_increased = data * self.config.volume_factor
+            new_max = np.abs(volume_increased).max()
+            self.logger.info(f"New max amplitude after increase: {new_max:.4f}")
+
+            # Only normalize if absolutely necessary to prevent clipping
+            if new_max > 1.0:
+                self.logger.warning(f"Amplitude would clip at {new_max:.4f}, normalizing to prevent distortion")
+                scaling_factor = 0.99 / new_max  # Leave tiny headroom
+                volume_increased = volume_increased * scaling_factor
+                final_max = np.abs(volume_increased).max()
+                self.logger.info(f"After normalization max amplitude: {final_max:.4f}")
+            else:
+                self.logger.info(f"No normalization needed, final max amplitude: {new_max:.4f}")
+
+            # Calculate and log the effective volume change
+            effective_change = np.abs(volume_increased).max() / original_max
+            self.logger.info(f"Effective volume increase factor: {effective_change:.4f}x")
 
             # Write processed audio
             sf.write(file_path, volume_increased, samplerate)
@@ -255,26 +272,26 @@ class FileHandler:
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description='Process audio files to adjust volume with various options and safety features'
+        description="Audio processing tool to adjust volume of audio files"
     )
-    parser.add_argument('--folder', type=Path, required=True,
-                    help='Folder path containing audio files')
-    parser.add_argument('--backup-folder', type=Path,
-                    help='Folder path to store backup copies')
-    parser.add_argument('--volume-factor', type=float, default=1.2,
-                    help='Volume increase factor (e.g., 1.2 for 20% increase)')
-    parser.add_argument('--formats', type=str, default='wav',
-                    help='Comma-separated list of audio formats to process')
-    parser.add_argument('--recursive', action='store_true',
-                    help='Process files in subdirectories')
-    parser.add_argument('--recent', action='store_true',
-                    help='Only process files from last 24 hours')
-    parser.add_argument('--workers', type=int, default=1,
-                    help='Number of worker processes for parallel processing')
-    parser.add_argument('--dry-run', action='store_true',
-                    help='Show what would be done without making changes')
-    parser.add_argument('--log-file', type=str,
-                    help='Path to log file for detailed logging')
+    parser.add_argument("--folder", type=Path, required=True,
+                    help="Input directory containing audio files to process")
+    parser.add_argument("--backup-folder", type=Path,
+                    help="Directory to store backup copies of original files")
+    parser.add_argument("--volume-factor", type=float, default=1.2,
+                    help="Multiplication factor for volume adjustment. 1.2 means 20 percent increase")
+    parser.add_argument("--formats", type=str, default="wav",
+                    help="Comma-separated list of audio formats to process. Example: wav,mp3,ogg")
+    parser.add_argument("--recursive", action="store_true",
+                    help="Process audio files in all subdirectories recursively")
+    parser.add_argument("--recent", action="store_true",
+                    help="Only process files modified in the last 24 hours")
+    parser.add_argument("--workers", type=int, default=1,
+                    help="Number of parallel processing workers")
+    parser.add_argument("--dry-run", action="store_true",
+                    help="Preview changes without modifying any files")
+    parser.add_argument("--log-file", type=str,
+                    help="Output file for detailed processing logs")
     return parser.parse_args()
 
 def main() -> None:
