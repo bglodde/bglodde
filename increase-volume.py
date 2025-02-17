@@ -16,6 +16,7 @@ Features:
 - Backup and safety features
 - Detailed logging
 - Dry-run mode for testing
+
 Usage Examples:
 --------------
 1. Basic usage (default 20% volume increase):
