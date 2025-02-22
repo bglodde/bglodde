@@ -54,17 +54,22 @@ import shutil
 from dataclasses import dataclass
 
 # Custom Exceptions
+
+
 class AudioProcessingError(Exception):
     """Base exception for audio processing errors."""
     pass
+
 
 class ValidationError(AudioProcessingError):
     """Raised when input validation fails."""
     pass
 
+
 class BackupError(AudioProcessingError):
     """Raised when backup operations fail."""
     pass
+
 
 @dataclass
 class ProcessingConfig:
@@ -103,19 +108,22 @@ to achieve the desired volume increase while maintaining audio quality.
         if self.volume_factor <= 0:
             raise ValidationError("Volume factor must be positive")
         if not self.input_folder.exists():
-            raise ValidationError(f"Input folder does not exist: {self.input_folder}")
+            raise ValidationError(
+                f"Input folder does not exist: {self.input_folder}")
         if self.backup_folder and not self.backup_folder.exists():
             os.makedirs(self.backup_folder)
 
+
 class Logger:
     """Handles all logging operations with support for multiple logging levels."""
+
     def __init__(self, log_file: Optional[str] = None):
         self.logger = logging.getLogger('AudioProcessor')
         self.logger.setLevel(logging.DEBUG)  # Set to DEBUG to allow all levels
-        
+
         # Remove any existing handlers to avoid duplicates
         self.logger.handlers = []
-        
+
         # Create formatter for consistent output
         formatter = logging.Formatter('%(levelname)s: %(message)s')
 
@@ -124,14 +132,14 @@ class Logger:
         console_handler.setFormatter(formatter)
         console_handler.setLevel(logging.INFO)  # Console shows INFO and above
         self.logger.addHandler(console_handler)
-        
+
         # Add file handler if specified
         if log_file:
             file_handler = logging.FileHandler(log_file)
             file_handler.setFormatter(formatter)
             file_handler.setLevel(logging.DEBUG)  # File logs everything
             self.logger.addHandler(file_handler)
-        
+
         # Initial session message
         self.logger.info("=== Audio Processing Session Started ===")
 
@@ -151,8 +159,10 @@ class Logger:
         """Log error level message."""
         self.logger.error(msg)
 
+
 class AudioProcessor:
     """Handles audio file processing operations."""
+
     def __init__(self, config: ProcessingConfig, logger: Logger):
         self.config = config
         self.logger = logger
@@ -162,7 +172,7 @@ class AudioProcessor:
 
         Args:
             file_path: Path to file to checksum
-        
+
         Returns:
             String containing hexadecimal SHA-256 checksum
         """
@@ -184,11 +194,13 @@ class AudioProcessor:
         """
         try:
             self.logger.info(f"Starting to process: {file_path}")
-            
+
             if self.config.dry_run:
                 self.logger.info(f"[DRY RUN] Would process: {file_path}")
-                self.logger.info(f"[DRY RUN] Would increase volume by {self.config.volume_factor}x")
-                self.logger.info(f"[DRY RUN] Would create backup in: {self.config.backup_folder}")
+                self.logger.info(
+                    f"[DRY RUN] Would increase volume by {self.config.volume_factor}x")
+                self.logger.info(
+                    f"[DRY RUN] Would create backup in: {self.config.backup_folder}")
                 return True
 
             # Create backup if needed
@@ -197,9 +209,10 @@ class AudioProcessor:
                 original_checksum = self.calculate_checksum(file_path)
                 shutil.copy2(file_path, backup_path)
                 backup_checksum = self.calculate_checksum(backup_path)
-                
+
                 if original_checksum != backup_checksum:
-                    raise BackupError(f"Backup verification failed for {file_path}")
+                    raise BackupError(
+                        f"Backup verification failed for {file_path}")
 
             # Process audio
             data, samplerate = sf.read(file_path)
@@ -216,7 +229,8 @@ class AudioProcessor:
             # Convert to scalar values by taking mean across channels
             max_amp = float(np.mean(original_max))
             rms_amp = float(np.mean(original_rms))
-            self.logger.info(f"Original max amplitude: {max_amp:.4f}, RMS: {rms_amp:.4f}")
+            self.logger.info(
+                f"Original max amplitude: {max_amp:.4f}, RMS: {rms_amp:.4f}")
 
             # Dynamic Range Compression Stage
             # Apply professional-grade dynamic range compression to control volume dynamics
@@ -236,7 +250,8 @@ class AudioProcessor:
             release_ms = 50  # Release time in milliseconds
 
             # Calculate gain reduction per channel
-            gain_reduction_db = np.maximum(0, db - threshold_db) * (1 - 1/ratio)
+            gain_reduction_db = np.maximum(
+                0, db - threshold_db) * (1 - 1/ratio)
 
             # Apply attack/release envelope
             attack_samples = int(samplerate * attack_ms / 1000)
@@ -253,8 +268,8 @@ class AudioProcessor:
             smoothed_reduction = np.zeros_like(gain_reduction_db)
             for channel in range(data.shape[1]):
                 smoothed_reduction[:, channel] = np.convolve(
-                    gain_reduction_db[:, channel], 
-                    window, 
+                    gain_reduction_db[:, channel],
+                    window,
                     mode='same'
                 )
 
@@ -277,29 +292,35 @@ class AudioProcessor:
 
             # Only limit if needed
             if np.any(max_amplitude > (limiter_threshold - knee_width)):
-                self.logger.info(f"Applying soft-knee limiting above {limiter_threshold-knee_width:.2f}")
-                
+                self.logger.info(
+                    f"Applying soft-knee limiting above {limiter_threshold-knee_width:.2f}")
+
                 # Calculate attenuation curve per channel
                 gain_reduction = np.zeros_like(volume_increased)
                 amplitude = np.abs(volume_increased)
-                
+
                 # Soft knee region
                 knee_start = limiter_threshold - knee_width
                 knee_end = limiter_threshold
-                
+
                 for channel in range(data.shape[1]):
-                    knee_mask = (amplitude[:, channel] > knee_start) & (amplitude[:, channel] <= knee_end)
+                    knee_mask = (amplitude[:, channel] > knee_start) & (
+                        amplitude[:, channel] <= knee_end)
                     above_knee = amplitude[:, channel] > knee_end
-                    
+
                     # Quadratic gain reduction in knee region
-                    x = (amplitude[knee_mask, channel] - knee_start) / knee_width
-                    gain_reduction[knee_mask, channel] = x * x * (knee_width / 2)
-                    
+                    x = (amplitude[knee_mask, channel] -
+                         knee_start) / knee_width
+                    gain_reduction[knee_mask, channel] = x * \
+                        x * (knee_width / 2)
+
                     # Hard limiting above knee
-                    gain_reduction[above_knee, channel] = amplitude[above_knee, channel] - limiter_threshold
-                
+                    gain_reduction[above_knee, channel] = amplitude[above_knee,
+                                                                    channel] - limiter_threshold
+
                 # Apply gain reduction (maintains dimensions)
-                volume_increased = volume_increased * np.power(10, -gain_reduction/20)
+                volume_increased = volume_increased * \
+                    np.power(10, -gain_reduction/20)
 
             # Squeeze back to mono if input was mono
             if data.shape[1] == 1:
@@ -308,18 +329,23 @@ class AudioProcessor:
             # Calculate final stats
             # Calculate per-channel statistics for processed audio
             final_max_per_channel = np.max(np.abs(volume_increased), axis=0)
-            final_rms_per_channel = np.sqrt(np.mean(volume_increased**2, axis=0))
+            final_rms_per_channel = np.sqrt(
+                np.mean(volume_increased**2, axis=0))
 
             # Convert to scalar values for logging
             final_max = float(np.mean(final_max_per_channel))
             final_rms = float(np.mean(final_rms_per_channel))
 
             # Calculate ratios using mean values to avoid division issues
-            rms_ratio = float(np.mean(final_rms_per_channel / np.maximum(original_rms, 1e-10)))
-            peak_ratio = float(np.mean(final_max_per_channel / np.maximum(original_max, 1e-10)))
+            rms_ratio = float(np.mean(final_rms_per_channel /
+                              np.maximum(original_rms, 1e-10)))
+            peak_ratio = float(
+                np.mean(final_max_per_channel / np.maximum(original_max, 1e-10)))
 
-            self.logger.info(f"Final max amplitude: {final_max:.4f}, RMS: {final_rms:.4f}")
-            self.logger.info(f"Volume increase: {rms_ratio:.2f}x (RMS), Peak: {peak_ratio:.2f}x")
+            self.logger.info(
+                f"Final max amplitude: {final_max:.4f}, RMS: {final_rms:.4f}")
+            self.logger.info(
+                f"Volume increase: {rms_ratio:.2f}x (RMS), Peak: {peak_ratio:.2f}x")
 
             # Write processed audio
             sf.write(file_path, volume_increased, samplerate)
@@ -330,19 +356,21 @@ class AudioProcessor:
             self.logger.error(f"Error processing {file_path}: {str(e)}")
             return False
 
+
 class FileHandler:
     """Handles file system operations for audio processing.
-    
+
     This class manages all file-related operations including:
     - Recursive file discovery
     - Format filtering
     - Recent file filtering
     - Path validation
     - File enumeration
-    
+
     It works closely with the ProcessingConfig to determine which files
     should be processed based on format, recursion settings, and time
     filters."""
+
     def __init__(self, config: ProcessingConfig, logger: logging.Logger):
         """
         Initialize the FileHandler with configuration and logger.
@@ -363,27 +391,30 @@ class FileHandler:
 
     def get_files_to_process(self) -> List[Path]:
         """Get list of audio files to process."""
-        self.logger.info(f"Searching for audio files in: {self.config.input_folder}")
+        self.logger.info(
+            f"Searching for audio files in: {self.config.input_folder}")
         self.logger.info(f"File formats to process: {self.config.formats}")
-        
+
         if not self.config.input_folder.exists():
-            self.logger.error(f"Input folder does not exist: {self.config.input_folder}")
+            self.logger.error(
+                f"Input folder does not exist: {self.config.input_folder}")
             return []
 
         if not self.config.input_folder.is_dir():
-            self.logger.error(f"Input path is not a directory: {self.config.input_folder}")
+            self.logger.error(
+                f"Input path is not a directory: {self.config.input_folder}")
             return []
 
         files = []
         for format in self.config.formats:
             pattern = f"*.{format}"
             self.logger.debug(f"Searching with pattern: {pattern}")
-            
+
             if self.config.recursive:
                 matches = list(self.config.input_folder.rglob(pattern))
             else:
                 matches = list(self.config.input_folder.glob(pattern))
-            
+
             self.logger.info(f"Found {len(matches)} files matching {pattern}")
             for match in matches:
                 self.logger.debug(f"Found file: {match}")
@@ -391,46 +422,51 @@ class FileHandler:
 
         if self.config.recent_only:
             cutoff_time = datetime.now() - timedelta(hours=24)
-            self.logger.info(f"Filtering for files modified after: {cutoff_time}")
-            files = [f for f in files if f.stat().st_mtime > cutoff_time.timestamp()]
-            self.logger.info(f"After time filter: {len(files)} files remaining")
+            self.logger.info(
+                f"Filtering for files modified after: {cutoff_time}")
+            files = [f for f in files if f.stat().st_mtime >
+                     cutoff_time.timestamp()]
+            self.logger.info(
+                f"After time filter: {len(files)} files remaining")
 
         self.logger.info(f"Total files to process: {len(files)}")
         return files
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Audio processing tool to adjust volume of audio files"
     )
     parser.add_argument("--folder", type=Path, required=True,
-                    help="Input directory containing audio files to process")
+                        help="Input directory containing audio files to process")
     parser.add_argument("--backup-folder", type=Path,
-                    help="Directory to store backup copies of original files")
+                        help="Directory to store backup copies of original files")
     parser.add_argument("--volume-factor", type=float, default=1.2,
-                    help="Multiplication factor for volume adjustment. 1.2 means 20 percent increase")
+                        help="Multiplication factor for volume adjustment. 1.2 means 20 percent increase")
     parser.add_argument("--formats", type=str, default="wav",
-                    help="Comma-separated list of audio formats to process. Example: wav,mp3,ogg")
+                        help="Comma-separated list of audio formats to process. Example: wav,mp3,ogg")
     parser.add_argument("--recursive", action="store_true",
-                    help="Process audio files in all subdirectories recursively")
+                        help="Process audio files in all subdirectories recursively")
     parser.add_argument("--recent", action="store_true",
-                    help="Only process files modified in the last 24 hours")
+                        help="Only process files modified in the last 24 hours")
     parser.add_argument("--workers", type=int, default=1,
-                    help="Number of parallel processing workers")
+                        help="Number of parallel processing workers")
     parser.add_argument("--dry-run", action="store_true",
-                    help="Preview changes without modifying any files")
+                        help="Preview changes without modifying any files")
     parser.add_argument("--log-file", type=str,
-                    help="Output file for detailed processing logs")
+                        help="Output file for detailed processing logs")
     return parser.parse_args()
+
 
 def main() -> None:
     print("Starting audio processing script...")
     try:
         # Parse arguments first
         args = parse_arguments()
-        
+
         # Initialize logger with parsed arguments
         logger = Logger(args.log_file)
-        
+
         # Log startup information
         logger.info("Audio Processing Script Started")
         logger.info(f"Parsed arguments: {vars(args)}")
@@ -449,8 +485,10 @@ def main() -> None:
         # Create configuration
         config = ProcessingConfig(
             input_folder=Path(args.folder),
-            backup_folder=Path(args.backup_folder) if args.backup_folder else None,
-            formats=set(args.formats.lower().split(',')) if args.formats else {'wav'},
+            backup_folder=Path(
+                args.backup_folder) if args.backup_folder else None,
+            formats=set(args.formats.lower().split(
+                ',')) if args.formats else {'wav'},
             dry_run=args.dry_run,
             recursive=args.recursive,
             recent_only=args.recent,
@@ -467,26 +505,29 @@ def main() -> None:
         # Initialize handlers
         file_handler = FileHandler(config, logger)
         files = file_handler.get_files_to_process()
-        
+
         if not files:
             logger.info("No files found to process")
             return
 
         # Initialize audio processor
         audio_processor = AudioProcessor(config, logger)
-        
+
         # Process files
         with ProcessPoolExecutor(max_workers=config.workers) as executor:
             if config.dry_run:
                 for file in files:
                     logger.info(f"Would process: {file}")
                     if config.backup_folder:
-                        logger.info(f"Would backup to: {config.backup_folder / file.name}")
-                    logger.info(f"Would increase volume by factor: {config.volume_factor}")
+                        logger.info(
+                            f"Would backup to: {config.backup_folder / file.name}")
+                    logger.info(
+                        f"Would increase volume by factor: {config.volume_factor}")
             else:
                 # Submit all file processing tasks
-                future_to_file = {executor.submit(audio_processor.process_file, file): file for file in files}
-                
+                future_to_file = {executor.submit(
+                    audio_processor.process_file, file): file for file in files}
+
                 # Process results as they complete
                 for future in tqdm(as_completed(future_to_file), total=len(files), desc="Processing files"):
                     file = future_to_file[future]
@@ -507,5 +548,7 @@ def main() -> None:
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
 if __name__ == '__main__':
     main()
