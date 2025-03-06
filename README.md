@@ -1,4 +1,4 @@
-# 👋 E Komo Mai
+# 👋 E Komo Mai 🏝
 This repository contains a collection of random, yet occasionally useful projects, scripts, and bits that you may find useful.
 
 ## Python 
