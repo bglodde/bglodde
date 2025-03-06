@@ -6,6 +6,7 @@ This repository contains a collection of random, yet occasionally useful scripts
 Connects to the Messages app's chat.db SQLite database and provides functionality to list users (with their phone numbers/IDs) and export message
 history for specific users. The output can be filtered by date ranges and message exports are saved to a log file.
 
+●▬▬▬▬๑۩۩๑▬▬▬▬▬●
 
 ### [increase-volume](https://github.com/bglodde/bglodde/blob/main/increase-volume.py) : An Audio Volume Processor
 A comprehensive audio processing tool that can increase volume of audio files with advanced dynamic processing, safety features and options.
