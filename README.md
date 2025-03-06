@@ -1,5 +1,5 @@
 # E Komo Mai 👋
-This repository contains a collection of random, yet occasionally useful scripts that you may find helpful.
+This repository contains a collection of random, yet occasionally useful projects, scripts, and bits that you may find helpful.
 
 ## Python 
 ### [message-utility](https://github.com/bglodde/bglodde/blob/main/messageUtility/messageUtility.py) : iMessage Utility
