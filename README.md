@@ -3,7 +3,7 @@ This repository contains a collection of random, yet occasionally useful project
 
 ## Python 
 ### [message-utility](https://github.com/bglodde/bglodde/blob/main/messageUtility/messageUtility.py) : iMessage Utility
-Connects to the Messages app's chat.db SQLite database and provides functionality to list users (with their phone numbers/IDs) and export message
+Connects to the iMessages app's chat.db SQLite database (on a Mac) and provides functionality to list users (with their phone numbers/IDs) and export message
 history for specific users. The output can be filtered by date ranges and message exports are saved to a log file.
 
 ●▬▬▬▬๑۩۩๑▬▬▬▬▬●
